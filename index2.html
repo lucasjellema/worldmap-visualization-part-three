@@ -1,0 +1,186 @@
+<DOCTYPE html>
+    <html>
+
+    <head>
+        <title>World Map</title>
+        <script src="https://d3js.org/d3.v6.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+        <style>
+            .country {
+                stroke: lightblue;
+                stroke-width: 0.75px;
+            }
+
+            .selectedCountry {
+                stroke: #f07004;
+                stroke-width: 1.8px;
+            }
+        </style>
+    </head>
+
+    <body>
+        <h1>Population Density per country</h1>
+        <div id="map-container"></div>
+        <script>
+            const svg = d3.select("#map-container")
+                .append("svg")
+                .attr("width", 1000)
+                .attr("height", 400);
+
+            // URL of the GeoJSON file
+            const geojsonUrl = "https://data.opendatasoft.com/api/explore/v2.1/catalog/datasets/natural-earth-countries-1_110m@public/exports/geojson?lang=en&timezone=Europe%2FBerlin";
+            const worldDataUrl = "https://raw.githubusercontent.com/lucasjellema/worldmap-visualization-part-three/main/world-data-2023.csv"
+            let geojsonCountryData
+            let selectedCountries = {}
+            let mostRecentProperty
+
+            const parseCSV = (csvString) => {
+                return new Promise((resolve, reject) => {
+                    Papa.parse(csvString, {
+                        complete: results => resolve(results.data),
+                        error: error => reject(error),
+                        header: true // if your CSV has headers; set to false otherwise
+                    });
+                });
+            }
+
+            Promise.all([
+                d3.json(geojsonUrl),
+                fetch(worldDataUrl).then(response => response.text().then(csvString => parseCSV(csvString)))
+            ])
+                .then(([geojsonData, worldDataRecords]) => {
+                    // Both promises have resolved
+                    // geojsonData is the result of d3.json
+                    // worldDataRecords is the result of fetch and papa parse
+                    // bring data from worldDataRecords and geojsonData together
+                    const countryDataMap = {}
+                    for (const country of worldDataRecords) {
+                        countryDataMap[country.Abbreviation] = country
+                        countryDataMap[country.Country] = country
+                    }
+                    geojsonData.features.forEach((d) => {
+                        const countryCode = d.properties.iso_a2;
+                        const countryName = d.properties.name;
+                        const country = countryDataMap[countryCode] || countryDataMap[countryName]
+                        if (country) {
+                            // copy properties from country record to d.properties
+                            for (let key in country) {
+                                if (key !== 'Country') {
+                                    d.properties[key] = country[key];
+                                }
+                            }
+                        }
+                    })
+                    geojsonCountryData = geojsonData
+                    redrawWorldMap(-110)
+                    displayProperty("Density(People/Km2)")
+
+
+                })
+                .catch(error => {
+                    // Handle errors here
+                    console.error('An error occurred:', error);
+                });
+
+            const redrawWorldMap = (rotation) => {
+                svg.selectAll("path").remove();
+                let projection = d3.geoEquirectangular()
+                    .rotate([rotation, 0]) // rotate the projection to 110 degrees east of Greenwich. center on Indonesia  
+                // decide on the projection to use for turning Long/Lat into X,Y
+
+                let geoGenerator = d3.geoPath()
+                    .projection(projection); // a function to turn the GeoJSON (long/lat) features property into SVG (X,Y) path definition  
+
+
+                svg
+                    .selectAll('path')
+                    .data(geojsonCountryData.features)
+                    .join('path')
+                    .attr('d', geoGenerator)
+                    .attr('class', 'country')
+                    .on('click', handleCountryClick)
+                    .append('title')
+                    .text((d) => `${d.properties.name}`)
+
+            }
+
+            const displayProperty = (property) => {
+                mostRecentProperty = property;
+                // find the domain for this property
+                const propertyDomain = d3.extent(geojsonCountryData.features, (d) => parseFloat(d.properties[property]))
+                const colorScale = d3.scaleSequential(d3.interpolateBlues).domain(propertyDomain)
+
+                svg
+                    .selectAll('path')
+                    .data(geojsonCountryData.features)
+                    .style('fill', (d) => colorScale(parseFloat(d.properties[property])))
+                    .attr('class', 'country')
+                    .select('title')
+                    .text(
+                        (d) => `${d.properties.name} (${property}: ${d.properties[property]})`)
+            }
+
+            const getCountryNodes = () => svg.selectAll('path').data(geojsonCountryData.features)
+
+
+            const highlightCountry = (countryName) => {
+                getCountryNodes()
+                    .filter((c) => countryName === c.properties.name)
+                    .classed('selectedCountry', true)
+            }
+
+            const unhighlightCountry = (countryName) => {
+                getCountryNodes()
+                    .filter((c) => countryName === c.properties.name)
+                    .classed('selectedCountry', false)
+            }
+
+            const highlightSelectedCountries = () => {
+                getCountryNodes()
+                    .filter((c) => selectedCountries[c.properties.name])
+                    .classed('selectedCountry', true)
+            }
+
+            const handleCountryClick = (event, d) => {
+                const ctrlPressed = event.ctrlKey
+                if (!ctrlPressed) {
+                    // unselect all currently selected countries except the clicked one
+                    for (const key in selectedCountries) {
+                        if (key != d.properties.name) {
+                            unhighlightCountry(key);
+                            delete selectedCountries[key]
+                        }
+                    }
+                }
+
+                if (selectedCountries[d.properties.name]) {
+                    // clicked country was already selected
+                    unhighlightCountry(d.properties.name)
+                    delete selectedCountries[d.properties.name]
+                } else {
+                    highlightCountry(d.properties.name)
+                    selectedCountries[d.properties.name] = d
+                }
+            }
+
+            const setRotation = (newRotation) => {
+                redrawWorldMap(newRotation)
+                displayProperty(mostRecentProperty)
+                highlightSelectedCountries()
+            }
+
+        </script>
+        <label for="rotationRange">Rotation (-180 to 180):</label>
+        <input type="range" id="rotationRange" name="rotation" min="-180" max="180" value="-110" step="5">
+        <p>Current rotation: <span id="rotationValue">-110</span> degrees</p>
+        <script>
+            // JavaScript to update the display as the slider moves
+            document.getElementById('rotationRange').addEventListener('input', function (event) {
+                document.getElementById('rotationValue').textContent = event.target.value;
+                setRotation(parseInt(event.target.value))
+            });
+        </script>
+
+    </body>
+
+    </html>
