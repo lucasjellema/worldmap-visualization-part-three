@@ -27,7 +27,6 @@
             const worldDataUrl = "https://raw.githubusercontent.com/lucasjellema/worldmap-visualization-part-three/main/world-data-2023.csv"
             let geojsonCountryData
             let selectedCountries = {}
-            let rotation = -110
             let mostRecentProperty
 
             const parseCSV = (csvString) => {
@@ -68,7 +67,7 @@
                         }
                     })
                     geojsonCountryData = geojsonData
-                    redrawWorldMap()
+                    redrawWorldMap(-110)
                     displayProperty("Density(People/Km2)")
                 })
                 .catch(error => {
@@ -76,9 +75,8 @@
                     console.error('An error occurred:', error);
                 });
 
-            const redrawWorldMap = () => {
+            const redrawWorldMap = (rotation) => {
                 svg.selectAll("path").remove();
-                let rotation = -110
                 let projection = d3.geoEquirectangular()  // decide on the projection to use for turning Long/Lat into X,Y
                     .rotate([rotation, 0]) // rotate the projection to rotation degrees east or west of Greenwich.  
                 
@@ -93,7 +91,6 @@
                     .attr('class', 'country')
                     .append('title')
                     .text((d) => `${d.properties.name}`)
-
             }
 
             const displayProperty = (property) => {
@@ -113,8 +110,7 @@
             }
 
             const setRotation = (newRotation) => {
-                rotation = newRotation
-                redrawWorldMap()
+                redrawWorldMap(newRotation)
                 displayProperty(mostRecentProperty)
             }
 
